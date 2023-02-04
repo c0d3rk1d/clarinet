@@ -266,8 +266,8 @@ impl Session {
             cmd if cmd.starts_with("::set_epoch") => self.set_epoch(&mut output, cmd),
             cmd if cmd.starts_with("::encode") => self.encode(&mut output, cmd),
             cmd if cmd.starts_with("::decode") => self.decode(&mut output, cmd),
-            #[cfg(feature = "cli")]
-            cmd if cmd.starts_with("::debug") => self.debug(&mut output, cmd),
+            // #[cfg(feature = "cli")]
+            // cmd if cmd.starts_with("::debug") => self.debug(&mut output, cmd),
             #[cfg(feature = "cli")]
             cmd if cmd.starts_with("::trace") => self.trace(&mut output, cmd),
             #[cfg(feature = "cli")]
@@ -421,38 +421,38 @@ impl Session {
         }
     }
 
-    #[cfg(feature = "cli")]
-    pub fn debug(&mut self, output: &mut Vec<String>, cmd: &str) {
-        use crate::repl::debug::cli::CLIDebugger;
+    // #[cfg(feature = "cli")]
+    // pub fn debug(&mut self, output: &mut Vec<String>, cmd: &str) {
+    //     use crate::repl::debug::cli::CLIDebugger;
 
-        let snippet = match cmd.split_once(" ") {
-            Some((_, snippet)) => snippet,
-            _ => return output.push(red!("Usage: ::debug <expr>")),
-        };
+    //     let snippet = match cmd.split_once(" ") {
+    //         Some((_, snippet)) => snippet,
+    //         _ => return output.push(red!("Usage: ::debug <expr>")),
+    //     };
 
-        let mut debugger = CLIDebugger::new(&QualifiedContractIdentifier::transient(), snippet);
+    //     let mut debugger = CLIDebugger::new(&QualifiedContractIdentifier::transient(), snippet);
 
-        let mut result = match self.formatted_interpretation(
-            snippet.to_string(),
-            None,
-            true,
-            Some(vec![&mut debugger]),
-            None,
-        ) {
-            Ok((mut output, result)) => {
-                match result.result {
-                    EvaluationResult::Contract(contract_result) => {
-                        let snippet = format!("→ .{} contract successfully stored. Use (contract-call? ...) for invoking the public functions:", contract_result.contract.contract_identifier.clone());
-                        output.push(green!(snippet));
-                    }
-                    _ => (),
-                };
-                output
-            }
-            Err(result) => result,
-        };
-        output.append(&mut result);
-    }
+    //     let mut result = match self.formatted_interpretation(
+    //         snippet.to_string(),
+    //         None,
+    //         true,
+    //         Some(vec![&mut debugger]),
+    //         None,
+    //     ) {
+    //         Ok((mut output, result)) => {
+    //             match result.result {
+    //                 EvaluationResult::Contract(contract_result) => {
+    //                     let snippet = format!("→ .{} contract successfully stored. Use (contract-call? ...) for invoking the public functions:", contract_result.contract.contract_identifier.clone());
+    //                     output.push(green!(snippet));
+    //                 }
+    //                 _ => (),
+    //             };
+    //             output
+    //         }
+    //         Err(result) => result,
+    //     };
+    //     output.append(&mut result);
+    // }
 
     #[cfg(feature = "cli")]
     pub fn trace(&mut self, output: &mut Vec<String>, cmd: &str) {

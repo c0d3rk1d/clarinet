@@ -13,9 +13,12 @@
     "vscode": "^1.52.0"
   },
   "devDependencies": {
-    "@types/vscode": "^1.68.0"
+    "@types/node": "^18.11.18",
+    "@types/vscode": "^1.68.0",
+    "url": "^0.11.0"
   },
   "dependencies": {
+    "@vscode/debugadapter": "^1.59.0",
     "@vscode/test-web": "^0.0.34",
     "vscode-languageclient": "^8.0.1"
   }

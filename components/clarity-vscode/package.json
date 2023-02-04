@@ -58,7 +58,6 @@
     "workspaceContains:Clarinet.toml",
     "onLanguage:clarity"
   ],
-  "main": "./client/dist/clientNode.js",
   "browser": "./client/dist/clientBrowser.js",
   "contributes": {
     "configuration": [
@@ -186,8 +185,7 @@
       {
         "type": "clarinet",
         "label": "Clarinet Debug",
-        "program": "./debug/dist/debug.js",
-        "runtime": "node",
+        "runtime": "inline",
         "languages": [
           "clarity"
         ],

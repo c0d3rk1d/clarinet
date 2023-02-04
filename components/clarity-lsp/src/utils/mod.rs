@@ -7,10 +7,12 @@ use lsp_types::Url;
 use lsp_types::{DiagnosticSeverity, Position, Range};
 
 #[allow(unused_macros)]
-#[cfg(feature = "wasm")]
 macro_rules! log {
     ( $( $t:tt )* ) => {
+        #[cfg(feature = "wasm")]
         web_sys::console::log_1(&format!( $( $t )* ).into());
+        #[cfg(not(feature = "wasm"))]
+        println!( $($t )*);
     }
 }
 

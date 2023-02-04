@@ -1,39 +1,57 @@
-use std::collections::HashMap;
-use std::hash::Hash;
-use std::io::Write;
-use std::path::PathBuf;
-
 use super::{extract_watch_variable, AccessType, State};
-use clarity::vm::callables::FunctionIdentifier;
-use clarity::vm::contexts::{ContractContext, GlobalContext};
-use clarity::vm::errors::Error;
-use clarity::vm::representations::Span;
-use clarity::vm::types::{CallableData, PrincipalData, SequenceData, StandardPrincipalData, Value};
-use clarity::vm::SymbolicExpressionType::List;
-use clarity::vm::{
+use clarinet_files::url::Url;
+use clarinet_files::FileLocation;
+use clarity_repl::clarity::vm::callables::FunctionIdentifier;
+use clarity_repl::clarity::vm::contexts::{ContractContext, GlobalContext};
+use clarity_repl::clarity::vm::errors::Error;
+use clarity_repl::clarity::vm::representations::Span;
+use clarity_repl::clarity::vm::types::{
+    CallableData, PrincipalData, SequenceData, StandardPrincipalData, Value,
+};
+use clarity_repl::clarity::vm::SymbolicExpressionType::List;
+use clarity_repl::clarity::vm::{
     contexts::{Environment, LocalContext},
     types::QualifiedContractIdentifier,
     EvalHook, SymbolicExpression,
 };
-use clarity::vm::{
+use clarity_repl::clarity::vm::{
     ContractEvaluationResult, EvaluationResult, ExecutionResult, SnippetEvaluationResult,
 };
+use clarity_repl::utils::serialize_event;
 use debug_types::events::*;
 use debug_types::requests::*;
 use debug_types::responses::*;
 use debug_types::types::*;
 use debug_types::*;
 use futures::{SinkExt, StreamExt};
-use tokio;
-use tokio::io::{Stdin, Stdout};
-use tokio::runtime::Runtime;
-use tokio_util::codec::{FramedRead, FramedWrite};
+use js_sys::Function as JsFunction;
+use serde::{Deserialize, Serialize};
+use serde_wasm_bindgen::{to_value as encode_to_js, Serializer};
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::io::Write;
+use std::path::PathBuf;
+use wasm_bindgen::JsValue;
+// use tokio;
+// use tokio::io::{Stdin, Stdout};
+// use tokio::runtime::Runtime;
+// use tokio_util::codec::{FramedRead, FramedWrite};
 
-use self::codec::{DebugAdapterCodec, ParseError};
+// use self::codec::{DebugAdapterCodec, ParseError};
 
 use super::DebugState;
 
 mod codec;
+
+#[allow(unused_macros)]
+macro_rules! log {
+    ( $( $t:tt )* ) => {
+        #[cfg(feature = "wasm")]
+        web_sys::console::log_1(&format!( $( $t )* ).into());
+        #[cfg(not(feature = "wasm"))]
+        println!( $($t )*);
+    }
+}
 
 /*
  * DAP Session:
@@ -55,6 +73,7 @@ mod codec;
  *        |<-- threads response -------|
  */
 
+#[derive(Debug)]
 struct Current {
     source: Source,
     span: Span,
@@ -63,15 +82,16 @@ struct Current {
 }
 
 pub struct DAPDebugger {
-    rt: Runtime,
+    // rt: Runtime,
     default_sender: Option<StandardPrincipalData>,
-    pub path_to_contract_id: HashMap<PathBuf, QualifiedContractIdentifier>,
-    pub contract_id_to_path: HashMap<QualifiedContractIdentifier, PathBuf>,
-    reader: FramedRead<Stdin, DebugAdapterCodec<ProtocolMessage>>,
-    writer: FramedWrite<Stdout, DebugAdapterCodec<ProtocolMessage>>,
+    pub path_to_contract_id: HashMap<FileLocation, QualifiedContractIdentifier>,
+    pub contract_id_to_path: HashMap<QualifiedContractIdentifier, FileLocation>,
+    // reader: FramedRead<Stdin, DebugAdapterCodec<ProtocolMessage>>,
+    // writer: FramedWrite<Stdout, DebugAdapterCodec<ProtocolMessage>>,
     state: Option<DebugState>,
     send_seq: i64,
-    launched: Option<(String, String)>,
+    pub launched: Option<(String, String)>,
+    pub proceed: bool,
     launch_seq: i64,
     current: Option<Current>,
     init_complete: bool,
@@ -79,35 +99,40 @@ pub struct DAPDebugger {
     stack_frames: HashMap<FunctionIdentifier, StackFrame>,
     scopes: HashMap<i32, Vec<Scope>>,
     variables: HashMap<i32, Vec<Variable>>,
+    send_response_js: JsFunction,
+    send_event_js: JsFunction,
 }
 
 impl DAPDebugger {
-    pub fn new() -> Self {
-        let stdin = tokio::io::stdin();
-        let stdout = tokio::io::stdout();
+    pub fn new(send_response_js: JsFunction, send_event_js: JsFunction) -> Self {
+        // let stdin = tokio::io::stdin();
+        // let stdout = tokio::io::stdout();
 
-        let reader = FramedRead::new(stdin, DebugAdapterCodec::<ProtocolMessage>::default());
-        let writer = FramedWrite::new(stdout, DebugAdapterCodec::<ProtocolMessage>::default());
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        // let reader = FramedRead::new(stdin, DebugAdapterCodec::<ProtocolMessage>::default());
+        // let writer = FramedWrite::new(stdout, DebugAdapterCodec::<ProtocolMessage>::default());
+        // let rt = tokio::runtime::Builder::new_current_thread()
+        //     .enable_all()
+        //     .build()
+        //     .unwrap();
         Self {
-            rt,
+            // rt,
             default_sender: None,
             path_to_contract_id: HashMap::new(),
             contract_id_to_path: HashMap::new(),
-            reader,
-            writer,
+            // reader,
+            // writer,
             state: None,
             send_seq: 0,
             launched: None,
+            proceed: false,
             launch_seq: 0,
             current: None,
             init_complete: false,
             stack_frames: HashMap::new(),
             scopes: HashMap::new(),
             variables: HashMap::new(),
+            send_response_js,
+            send_event_js,
         }
     }
 
@@ -116,121 +141,133 @@ impl DAPDebugger {
     }
 
     // Process all messages before launching the REPL
-    pub fn init(&mut self) -> Result<(String, String), ParseError> {
-        while self.launched.is_none() {
-            match self.wait_for_command(None, None) {
-                Ok(_) => (),
-                Err(e) => return Err(e),
-            }
-        }
-        Ok(self.launched.take().unwrap())
-    }
+    // pub fn init(&mut self) -> Result<(String, String), ParseError> {
+    //     while self.launched.is_none() {
+    //         match self.wait_for_command(None, None) {
+    //             Ok(_) => (),
+    //             Err(e) => return Err(e),
+    //         }
+    //     }
+    //     Ok(self.launched.take().unwrap())
+    // }
 
     // Successful result boolean indicates if execution should continue based on the message received
-    fn wait_for_command(
-        &mut self,
-        env: Option<&mut Environment>,
-        context: Option<&LocalContext>,
-    ) -> Result<bool, ParseError> {
-        if let Some(msg) = self.rt.block_on(self.reader.next()) {
-            match msg {
-                Ok(msg) => {
-                    use debug_types::MessageKind::*;
-                    Ok(match msg.message {
-                        Request(command) => self.handle_request(env, context, msg.seq, command),
-                        Response(response) => {
-                            self.handle_response(msg.seq, response);
-                            false
-                        }
-                        Event(event) => {
-                            self.handle_event(msg.seq, event);
-                            false
-                        }
-                    })
-                }
-                Err(e) => Err(e),
-            }
-        } else {
-            Ok(true)
-        }
-    }
+    // fn wait_for_command(
+    //     &mut self,
+    //     env: Option<&mut Environment>,
+    //     context: Option<&LocalContext>,
+    // ) -> Result<bool, String> {
+    //     if let Some(msg) = self.rt.block_on(self.reader.next()) {
+    //         match msg {
+    //             Ok(msg) => {
+    //                 use debug_types::MessageKind::*;
+    //                 Ok(match msg.message {
+    //                     Request(command) => self.handle_request(env, context, msg.seq, command),
+    //                     Response(response) => {
+    //                         self.handle_response(msg.seq, response);
+    //                         false
+    //                     }
+    //                     Event(event) => {
+    //                         self.handle_event(msg.seq, event);
+    //                         false
+    //                     }
+    //                 })
+    //             }
+    //             Err(e) => Err(e),
+    //         }
+    //     } else {
+    //         Ok(true)
+    //     }
+    //     Ok(true)
+    // }
 
     fn send_response(&mut self, response: Response) {
-        let response_json = serde_json::to_string(&response).unwrap();
-        let message = ProtocolMessage {
-            seq: self.send_seq,
-            message: MessageKind::Response(response),
-        };
+        // let response_json = serde_json::to_string(&response).unwrap();
+        // let message = ProtocolMessage {
+        //     seq: self.send_seq,
+        //     message: MessageKind::Response(response),
+        // };
 
-        match self.rt.block_on(self.writer.send(message)) {
-            Ok(_) => (),
-            Err(e) => {
-                // If we can't send, there's not really anything else we can do.
-                println!("{} send_response: {}", red!("error:"), e);
-            }
+        // match self.rt.block_on(self.writer.send(message)) {
+        //     Ok(_) => (),
+        //     Err(e) => {
+        //         // If we can't send, there's not really anything else we can do.
+        //         println!("error: send_response: {}", e);
+        //     }
+        // };
+        let serializer = Serializer::json_compatible();
+        let _ = match response.serialize(&serializer).map_err(|_| JsValue::NULL) {
+            Ok(r) => self.send_response_js.call1(&JsValue::NULL, &r),
+            Err(err) => self.send_response_js.call1(&JsValue::NULL, &err),
         };
 
         self.send_seq += 1;
     }
 
     fn send_event(&mut self, body: EventBody) {
-        let event_json = serde_json::to_string(&body).unwrap();
-        let message = ProtocolMessage {
-            seq: self.send_seq,
-            message: MessageKind::Event(Event { body: Some(body) }),
-        };
+        // let event_json = serde_json::to_string(&body).unwrap();
+        // let message = ProtocolMessage {
+        //     seq: self.send_seq,
+        //     message: MessageKind::Event(Event { body: Some(body) }),
+        // };
 
-        match self.rt.block_on(self.writer.send(message)) {
-            Ok(_) => (),
-            Err(e) => {
-                // If we can't send, there's not really anything else we can do.
-                println!("{} send_event: {}", red!("error:"), e);
-            }
+        // match self.rt.block_on(self.writer.send(message)) {
+        //     Ok(_) => (),
+        //     Err(e) => {
+        //         // If we can't send, there's not really anything else we can do.
+        //         println!("error: send_event: {}", e);
+        //     }
+        // };
+
+        let serializer = Serializer::json_compatible();
+        let _ = match body.serialize(&serializer).map_err(|_| JsValue::NULL) {
+            Ok(r) => self.send_event_js.call1(&JsValue::NULL, &r),
+            Err(err) => self.send_event_js.call1(&JsValue::NULL, &err),
         };
 
         self.send_seq += 1;
     }
 
-    pub fn handle_request(
-        &mut self,
-        env: Option<&mut Environment>,
-        context: Option<&LocalContext>,
-        seq: i64,
-        command: RequestCommand,
-    ) -> bool {
-        use debug_types::requests::RequestCommand::*;
-        let proceed = match command {
-            Initialize(arguments) => self.initialize(seq, arguments),
-            Launch(arguments) => self.launch(seq, arguments),
-            ConfigurationDone => self.configuration_done(seq),
-            SetBreakpoints(arguments) => self.set_breakpoints(seq, arguments),
-            SetExceptionBreakpoints(arguments) => self.set_exception_breakpoints(seq, arguments),
-            Disconnect(arguments) => self.quit(seq, arguments),
-            Threads => self.threads(seq),
-            StackTrace(arguments) => self.stack_trace(seq, arguments),
-            Scopes(arguments) => self.scopes(seq, arguments),
-            Variables(arguments) => self.variables(seq, arguments),
-            StepIn(arguments) => self.step_in(seq, arguments),
-            StepOut(arguments) => self.step_out(seq, arguments),
-            Next(arguments) => self.next(seq, arguments),
-            Continue(arguments) => self.continue_(seq, arguments),
-            Pause(arguments) => self.pause(seq, arguments),
-            Evaluate(arguments) => self.evaluate(seq, arguments, env, context),
-            _ => {
-                self.send_response(Response {
-                    request_seq: seq,
-                    success: false,
-                    message: Some("unsupported request".to_string()),
-                    body: None,
-                });
-                false
-            }
-        };
+    // pub fn handle_request(
+    //     &mut self,
+    //     env: Option<&mut Environment>,
+    //     context: Option<&LocalContext>,
+    //     seq: i64,
+    //     command: RequestCommand,
+    // ) -> bool {
+    //     use debug_types::requests::RequestCommand::*;
+    //     let proceed = match command {
+    //         Initialize(arguments) => self.initialize(seq, arguments),
+    //         Launch(arguments) => self.launch(seq, arguments),
+    //         ConfigurationDone => self.configuration_done(seq),
+    //         // SetBreakpoints(arguments) => self.set_breakpoints(seq, arguments),
+    //         SetExceptionBreakpoints(arguments) => self.set_exception_breakpoints(seq, arguments),
+    //         Disconnect(arguments) => self.quit(seq, arguments),
+    //         Threads => self.threads(seq),
+    //         StackTrace(arguments) => self.stack_trace(seq, arguments),
+    //         Scopes(arguments) => self.scopes(seq, arguments),
+    //         Variables(arguments) => self.variables(seq, arguments),
+    //         StepIn(arguments) => self.step_in(seq, arguments),
+    //         StepOut(arguments) => self.step_out(seq, arguments),
+    //         Next(arguments) => self.next(seq, arguments),
+    //         Continue(arguments) => self.continue_(seq, arguments),
+    //         Pause(arguments) => self.pause(seq, arguments),
+    //         Evaluate(arguments) => self.evaluate(seq, arguments, env, context),
+    //         _ => {
+    //             self.send_response(Response {
+    //                 request_seq: seq,
+    //                 success: false,
+    //                 message: Some("unsupported request".to_string()),
+    //                 body: None,
+    //             });
+    //             false
+    //         }
+    //     };
 
-        proceed
-    }
+    //     proceed
+    // }
 
-    pub fn handle_event(&mut self, seq: i64, event: Event) {
+    pub fn handle_event(&mut self, seq: i64, _event: Event) {
         let response = Response {
             request_seq: seq,
             success: true,
@@ -240,7 +277,7 @@ impl DAPDebugger {
         self.send_response(response);
     }
 
-    pub fn handle_response(&mut self, seq: i64, response: Response) {
+    pub fn handle_response(&mut self, seq: i64, _response: Response) {
         let response = Response {
             request_seq: seq,
             success: true,
@@ -252,7 +289,7 @@ impl DAPDebugger {
 
     // Request handlers
 
-    fn initialize(&mut self, seq: i64, arguments: InitializeRequestArguments) -> bool {
+    pub fn initialize(&mut self, seq: i64, _arguments: InitializeRequestArguments) -> bool {
         let capabilities = Capabilities {
             supports_configuration_done_request: Some(true),
             supports_function_breakpoints: Some(true),
@@ -303,7 +340,6 @@ impl DAPDebugger {
                 capabilities,
             })),
         });
-
         false
     }
 
@@ -346,7 +382,7 @@ impl DAPDebugger {
         }));
     }
 
-    fn launch(&mut self, seq: i64, arguments: LaunchRequestArguments) -> bool {
+    pub fn launch(&mut self, seq: i64, arguments: LaunchRequestArguments) -> bool {
         // Verify that the manifest and expression were specified
         let manifest = match arguments.manifest {
             Some(manifest) => manifest,
@@ -382,7 +418,7 @@ impl DAPDebugger {
         false
     }
 
-    fn configuration_done(&mut self, seq: i64) -> bool {
+    pub fn configuration_done(&mut self, seq: i64) -> bool {
         self.send_response(Response {
             request_seq: seq,
             success: true,
@@ -401,14 +437,13 @@ impl DAPDebugger {
         false
     }
 
-    fn set_breakpoints(&mut self, seq: i64, arguments: SetBreakpointsArguments) -> bool {
+    pub fn set_breakpoints(&mut self, seq: i64, arguments: SetBreakpointsArguments) -> bool {
         let mut results = vec![];
+
+        let path = FileLocation::try_parse(arguments.source.path.as_ref().unwrap(), None).unwrap();
         match arguments.breakpoints {
             Some(breakpoints) => {
-                let contract_id = match self
-                    .path_to_contract_id
-                    .get(&PathBuf::from(arguments.source.path.as_ref().unwrap()))
-                {
+                let contract_id = match self.path_to_contract_id.get(&path) {
                     Some(contract_id) => contract_id,
                     None => {
                         self.send_response(Response {
@@ -477,10 +512,10 @@ impl DAPDebugger {
         false
     }
 
-    fn set_exception_breakpoints(
+    pub fn set_exception_breakpoints(
         &mut self,
         seq: i64,
-        arguments: SetExceptionBreakpointsArguments,
+        _arguments: SetExceptionBreakpointsArguments,
     ) -> bool {
         self.send_response(Response {
             request_seq: seq,
@@ -494,7 +529,7 @@ impl DAPDebugger {
         false
     }
 
-    fn threads(&mut self, seq: i64) -> bool {
+    pub fn threads(&mut self, seq: i64) -> bool {
         // There is only ever 1 thread
         self.send_response(Response {
             request_seq: seq,
@@ -536,30 +571,35 @@ impl DAPDebugger {
         false
     }
 
-    fn stack_trace(&mut self, seq: i64, arguments: StackTraceArguments) -> bool {
-        let current = self.current.as_ref().unwrap();
-        let frames: Vec<_> = current
-            .stack
-            .iter()
-            .rev()
-            .filter(|function| !function.to_string().starts_with("_native_:"))
-            .map(|function| self.stack_frames[function].clone())
-            .collect();
+    pub fn stack_trace(&mut self, seq: i64, _arguments: StackTraceArguments) -> bool {
+        log!("enter stack_trace");
+        let current = self.current.as_ref();
+        log!("> current: {:?}", &current);
+        // let frames: Vec<_> = current
+        //     .stack
+        //     .iter()
+        //     .rev()
+        //     .filter(|function| !function.to_string().starts_with("_native_:"))
+        //     .map(|function| self.stack_frames[function].clone())
+        //     .collect();
 
-        let len = current.stack.len() as i32;
+        // log!("> frames: {:?}", &frames);
+        // log!("----");
+
+        // let len = current.stack.len() as i32;
         self.send_response(Response {
             request_seq: seq,
             success: true,
             message: None,
             body: Some(ResponseBody::StackTrace(StackTraceResponse {
-                stack_frames: frames,
-                total_frames: Some(len),
+                stack_frames: vec![],
+                total_frames: Some(0),
             })),
         });
         false
     }
 
-    fn scopes(&mut self, seq: i64, arguments: ScopesArguments) -> bool {
+    pub fn scopes(&mut self, seq: i64, arguments: ScopesArguments) -> bool {
         self.send_response(Response {
             request_seq: seq,
             success: true,
@@ -571,11 +611,11 @@ impl DAPDebugger {
         false
     }
 
-    fn variables(&mut self, seq: i64, arguments: VariablesArguments) -> bool {
+    pub fn variables(&mut self, seq: i64, arguments: VariablesArguments) -> bool {
         let variables = match self.variables.get(&arguments.variables_reference) {
             Some(variables) => variables.clone(),
             None => {
-                self.log("unknown variable reference");
+                // self.log("unknown variable reference");
                 Vec::new()
             }
         };
@@ -589,7 +629,7 @@ impl DAPDebugger {
         false
     }
 
-    fn step_in(&mut self, seq: i64, arguments: StepInArguments) -> bool {
+    pub fn step_in(&mut self, seq: i64, _arguments: StepInArguments) -> bool {
         self.get_state().step_in();
 
         self.send_response(Response {
@@ -601,7 +641,7 @@ impl DAPDebugger {
         true
     }
 
-    fn step_out(&mut self, seq: i64, arguments: StepOutArguments) -> bool {
+    pub fn step_out(&mut self, seq: i64, _arguments: StepOutArguments) -> bool {
         self.get_state().finish();
 
         self.send_response(Response {
@@ -613,7 +653,7 @@ impl DAPDebugger {
         true
     }
 
-    fn next(&mut self, seq: i64, arguments: NextArguments) -> bool {
+    pub fn next(&mut self, seq: i64, _arguments: NextArguments) -> bool {
         let expr_id = self.current.as_ref().unwrap().expr_id;
         self.get_state().step_over(expr_id);
 
@@ -626,7 +666,7 @@ impl DAPDebugger {
         true
     }
 
-    fn continue_(&mut self, seq: i64, arguments: ContinueArguments) -> bool {
+    pub fn continue_(&mut self, seq: i64, _arguments: ContinueArguments) -> bool {
         self.get_state().continue_execution();
 
         self.send_response(Response {
@@ -640,7 +680,7 @@ impl DAPDebugger {
         true
     }
 
-    fn pause(&mut self, seq: i64, arguments: PauseArguments) -> bool {
+    pub fn pause(&mut self, seq: i64, _arguments: PauseArguments) -> bool {
         self.get_state().pause();
 
         self.send_response(Response {
@@ -652,7 +692,7 @@ impl DAPDebugger {
         true
     }
 
-    fn evaluate(
+    pub fn evaluate(
         &mut self,
         seq: i64,
         arguments: EvaluateArguments,
@@ -662,9 +702,7 @@ impl DAPDebugger {
         let (env, context) = match (env, context) {
             (Some(env), Some(context)) => (env, context),
             _ => {
-                self.log(
-                    "cannot evaluate an expression before initialization is complete".to_string(),
-                );
+                log!("cannot evaluate an expression before initialization is complete");
                 return true;
             }
         };
@@ -804,7 +842,7 @@ impl DAPDebugger {
         false
     }
 
-    fn quit(&mut self, seq: i64, arguments: DisconnectArguments) -> bool {
+    pub fn disconnect(&mut self, seq: i64, _arguments: DisconnectArguments) -> bool {
         self.get_state().quit();
 
         self.send_response(Response {
@@ -976,7 +1014,7 @@ impl EvalHook for DAPDebugger {
                     .contract_id_to_path
                     .get(&env.contract_context.contract_identifier)
                 {
-                    Some(path) => path.to_str().unwrap().to_string(),
+                    Some(path) => path.to_string(),
                     _ => "debugger".to_string(),
                 },
             ),
@@ -1064,7 +1102,6 @@ impl EvalHook for DAPDebugger {
                     hit_breakpoint_ids: None,
                 };
 
-                let state = self.get_state().state.clone();
                 match self.get_state().state {
                     State::Start => {
                         stopped.reason = StoppedReason::Entry;
@@ -1073,7 +1110,7 @@ impl EvalHook for DAPDebugger {
                         stopped.reason = StoppedReason::Breakpoint;
                         stopped.hit_breakpoint_ids = Some(vec![breakpoint]);
                     }
-                    State::DataBreak(breakpoint, access_type) => {
+                    State::DataBreak(breakpoint, _access_type) => {
                         stopped.reason = StoppedReason::DataBreakpoint;
                         stopped.hit_breakpoint_ids = Some(vec![breakpoint]);
                     }
@@ -1096,17 +1133,17 @@ impl EvalHook for DAPDebugger {
                 stack: stack_trace,
             });
 
-            let mut proceed = false;
-            while !proceed {
-                proceed = match self.wait_for_command(Some(env), Some(context)) {
-                    Ok(proceed) => proceed,
-                    Err(e) => {
-                        self.log(format!("error: {}", e));
-                        false
-                    }
-                };
-            }
-            self.current = None;
+            // let mut proceed = false;
+            // while !proceed {
+            //     proceed = match self.wait_for_command(Some(env), Some(context)) {
+            //         Ok(proceed) => proceed,
+            //         Err(e) => {
+            //             // self.log(format!("error: {}", e));
+            //             false
+            //         }
+            //     };
+            // }
+            // self.current = None;
         } else {
             // TODO: If there is already a message waiting, process it before
             //       continuing. This would be needed for a pause request.
@@ -1131,7 +1168,7 @@ impl EvalHook for DAPDebugger {
                 if !result.events.is_empty() {
                     self.log("\nEvents emitted:\n");
                     for event in &result.events {
-                        self.stdout(format!("{}\n", crate::utils::serialize_event(event)));
+                        self.stdout(format!("{}\n", serialize_event(event)));
                     }
                 }
 
@@ -1156,16 +1193,16 @@ impl EvalHook for DAPDebugger {
 
 fn type_for_value(value: &Value) -> String {
     match value {
-        Value::Int(int) => "int".to_string(),
-        Value::UInt(int) => "uint".to_string(),
-        Value::Bool(boolean) => "bool".to_string(),
+        Value::Int(_int) => "int".to_string(),
+        Value::UInt(_int) => "uint".to_string(),
+        Value::Bool(_boolean) => "bool".to_string(),
         Value::Tuple(data) => format!("{}", data.type_signature),
-        Value::Principal(principal_data) => "principal".to_string(),
+        Value::Principal(_principal_data) => "principal".to_string(),
         Value::Optional(opt_data) => format!("{}", opt_data.type_signature()),
         Value::Response(res_data) => format!("{}", res_data.type_signature()),
-        Value::Sequence(SequenceData::Buffer(vec_bytes)) => "buff".to_string(),
-        Value::Sequence(SequenceData::String(string)) => "string".to_string(),
-        Value::Sequence(SequenceData::List(list_data)) => "list".to_string(),
+        Value::Sequence(SequenceData::Buffer(_vec_bytes)) => "buff".to_string(),
+        Value::Sequence(SequenceData::String(_string)) => "string".to_string(),
+        Value::Sequence(SequenceData::List(_list_data)) => "list".to_string(),
         Value::CallableContract(callable) => {
             if let Some(trait_id) = &callable.trait_identifier {
                 format!("<{}>", trait_id)

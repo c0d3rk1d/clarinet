@@ -8,6 +8,6 @@
     "noImplicitAny": true,
     "strict": true
   },
-  "include": ["src", "tests"],
+  "include": ["src", "tests", "pkg"],
   "exclude": ["node_modules", ".vscode-test-web", "tests"]
 }

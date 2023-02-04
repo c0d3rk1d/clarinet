@@ -874,6 +874,7 @@ dependencies = [
  "clarinet-deployments",
  "clarinet-files",
  "clarinet-utils",
+ "clarity-dap",
  "clarity-lsp",
  "clarity-repl",
  "crossbeam-channel",
@@ -1042,6 +1043,47 @@ dependencies = [
  "sha2-asm",
  "stacks-common",
  "time 0.2.27",
+]
+
+[[package]]
+name = "clarity-dap"
+version = "1.0.0"
+dependencies = [
+ "ansi_term",
+ "atty",
+ "bytes",
+ "chainhook-types",
+ "clarinet-deployments",
+ "clarinet-files",
+ "clarity-repl",
+ "debug_types",
+ "futures",
+ "getrandom 0.2.8",
+ "hiro-system-kit",
+ "httparse",
+ "integer-sqrt",
+ "js-sys",
+ "lazy_static",
+ "libsecp256k1 0.5.0",
+ "log",
+ "memchr",
+ "pico-args",
+ "prettytable-rs",
+ "rand 0.7.3",
+ "rand_pcg 0.3.1",
+ "rand_seeder",
+ "regex",
+ "ripemd160 0.9.1",
+ "rustyline",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_derive",
+ "serde_json",
+ "sha2 0.10.6",
+ "sha3 0.9.1",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

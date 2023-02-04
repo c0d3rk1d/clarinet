@@ -12,7 +12,7 @@ use bytes::{Buf, BytesMut};
 use log::{trace, warn};
 use memchr::memmem;
 use serde::{de::DeserializeOwned, Serialize};
-use tokio_util::codec::{Decoder, Encoder};
+// use tokio_util::codec::{Decoder, Encoder};
 
 /// Errors that can occur when processing a DAP message.
 #[derive(Debug)]
@@ -108,23 +108,23 @@ impl<T> Default for DebugAdapterCodec<T> {
     }
 }
 
-impl<T: Serialize> Encoder<T> for DebugAdapterCodec<T> {
-    type Error = ParseError;
+// impl<T: Serialize> Encoder<T> for DebugAdapterCodec<T> {
+//     type Error = ParseError;
 
-    fn encode(&mut self, item: T, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let msg = serde_json::to_string(&item)?;
-        trace!("-> {}", msg);
+//     fn encode(&mut self, item: T, dst: &mut BytesMut) -> Result<(), Self::Error> {
+//         let msg = serde_json::to_string(&item)?;
+//         trace!("-> {}", msg);
 
-        // Reserve just enough space to hold the `Content-Length: ` and `\r\n\r\n` constants,
-        // the length of the message, and the message body.
-        dst.reserve(msg.len() + number_of_digits(msg.len()) + 20);
-        let mut writer = dst.writer();
-        write!(writer, "Content-Length: {}\r\n\r\n{}", msg.len(), msg)?;
-        writer.flush()?;
+//         // Reserve just enough space to hold the `Content-Length: ` and `\r\n\r\n` constants,
+//         // the length of the message, and the message body.
+//         dst.reserve(msg.len() + number_of_digits(msg.len()) + 20);
+//         let mut writer = dst.writer();
+//         write!(writer, "Content-Length: {}\r\n\r\n{}", msg.len(), msg)?;
+//         writer.flush()?;
 
-        Ok(())
-    }
-}
+//         Ok(())
+//     }
+// }
 
 #[inline]
 fn number_of_digits(mut n: usize) -> usize {
@@ -138,61 +138,61 @@ fn number_of_digits(mut n: usize) -> usize {
     num_digits
 }
 
-impl<T: DeserializeOwned> Decoder for DebugAdapterCodec<T> {
-    type Item = T;
-    type Error = ParseError;
+// impl<T: DeserializeOwned> Decoder for DebugAdapterCodec<T> {
+//     type Item = T;
+//     type Error = ParseError;
 
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if let Some(content_len) = self.content_len {
-            if src.len() < content_len {
-                return Ok(None);
-            }
+//     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+//         if let Some(content_len) = self.content_len {
+//             if src.len() < content_len {
+//                 return Ok(None);
+//             }
 
-            let bytes = &src[..content_len];
-            let message = std::str::from_utf8(bytes)?;
+//             let bytes = &src[..content_len];
+//             let message = std::str::from_utf8(bytes)?;
 
-            let result = if message.is_empty() {
-                Ok(None)
-            } else {
-                trace!("<- {}", message);
-                match serde_json::from_str(message) {
-                    Ok(parsed) => Ok(Some(parsed)),
-                    Err(err) => Err(err.into()),
-                }
-            };
+//             let result = if message.is_empty() {
+//                 Ok(None)
+//             } else {
+//                 trace!("<- {}", message);
+//                 match serde_json::from_str(message) {
+//                     Ok(parsed) => Ok(Some(parsed)),
+//                     Err(err) => Err(err.into()),
+//                 }
+//             };
 
-            src.advance(content_len);
-            self.content_len = None; // Reset state in preparation for parsing next message.
+//             src.advance(content_len);
+//             self.content_len = None; // Reset state in preparation for parsing next message.
 
-            result
-        } else {
-            let mut dst = [httparse::EMPTY_HEADER; 2];
+//             result
+//         } else {
+//             let mut dst = [httparse::EMPTY_HEADER; 2];
 
-            let (headers_len, headers) = match httparse::parse_headers(src, &mut dst)? {
-                httparse::Status::Complete(output) => output,
-                httparse::Status::Partial => return Ok(None),
-            };
+//             let (headers_len, headers) = match httparse::parse_headers(src, &mut dst)? {
+//                 httparse::Status::Complete(output) => output,
+//                 httparse::Status::Partial => return Ok(None),
+//             };
 
-            match decode_headers(headers) {
-                Ok(content_len) => {
-                    src.advance(headers_len);
-                    self.content_len = Some(content_len);
-                    self.decode(src) // Recurse right back in, now that `Content-Length` is known.
-                }
-                Err(err) => {
-                    match err {
-                        ParseError::MissingContentLength => {}
-                        _ => src.advance(headers_len),
-                    }
+//             match decode_headers(headers) {
+//                 Ok(content_len) => {
+//                     src.advance(headers_len);
+//                     self.content_len = Some(content_len);
+//                     self.decode(src) // Recurse right back in, now that `Content-Length` is known.
+//                 }
+//                 Err(err) => {
+//                     match err {
+//                         ParseError::MissingContentLength => {}
+//                         _ => src.advance(headers_len),
+//                     }
 
-                    // Skip any garbage bytes by scanning ahead for another potential message.
-                    src.advance(memmem::find(src, b"Content-Length").unwrap_or_default());
-                    Err(err)
-                }
-            }
-        }
-    }
-}
+//                     // Skip any garbage bytes by scanning ahead for another potential message.
+//                     src.advance(memmem::find(src, b"Content-Length").unwrap_or_default());
+//                     Err(err)
+//                 }
+//             }
+//         }
+//     }
+// }
 
 fn decode_headers(headers: &[httparse::Header<'_>]) -> Result<usize, ParseError> {
     let mut content_len = None;

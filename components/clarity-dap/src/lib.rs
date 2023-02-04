@@ -2,25 +2,24 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::Display;
 
-use crate::repl::diagnostic::output_diagnostic;
-use clarity::vm::ast::build_ast_with_diagnostics;
-use clarity::vm::contexts::{Environment, LocalContext};
-use clarity::vm::contracts::Contract;
-use clarity::vm::database::ClarityDatabase;
-use clarity::vm::diagnostic::Level;
-use clarity::vm::errors::Error;
-use clarity::vm::functions::NativeFunctions;
-use clarity::vm::representations::Span;
-use clarity::vm::representations::SymbolicExpression;
-use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData, Value};
-use clarity::vm::EvalHook;
-use clarity::vm::{eval, ClarityVersion};
-use clarity::vm::{ContractName, SymbolicExpressionType};
+use clarity_repl::clarity::vm::ast::build_ast_with_diagnostics;
+use clarity_repl::clarity::vm::contexts::{Environment, LocalContext};
+use clarity_repl::clarity::vm::contracts::Contract;
+use clarity_repl::clarity::vm::database::ClarityDatabase;
+use clarity_repl::clarity::vm::diagnostic::Level;
+use clarity_repl::clarity::vm::errors::Error;
+use clarity_repl::clarity::vm::functions::NativeFunctions;
+use clarity_repl::clarity::vm::representations::Span;
+use clarity_repl::clarity::vm::representations::SymbolicExpression;
+use clarity_repl::clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData, Value};
+use clarity_repl::clarity::vm::EvalHook;
+use clarity_repl::clarity::vm::{eval, ClarityVersion};
+use clarity_repl::clarity::vm::{ContractName, SymbolicExpressionType};
+use clarity_repl::repl::diagnostic::output_diagnostic;
+use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "cli")]
-pub mod cli;
-#[cfg(feature = "dap")]
 pub mod dap;
+pub mod wasm_bridge;
 
 #[derive(Clone)]
 pub struct Source {
@@ -355,7 +354,7 @@ impl DebugState {
 
         match eval(&ast.expressions[0], env, &context) {
             Ok(value) => Ok(value),
-            Err(e) => Err(vec![format_err!(e)]),
+            Err(e) => Err(vec![e.to_string()]),
         }
     }
 
@@ -404,7 +403,7 @@ impl DebugState {
                             function_name,
                             &ClarityVersion::latest(),
                         ) {
-                            use clarity::vm::functions::NativeFunctions::*;
+                            use clarity_repl::clarity::vm::functions::NativeFunctions::*;
                             if let Some((name, access_type)) = match native_function {
                                 FetchVar => Some((
                                     args[0].match_atom().unwrap().to_string(),

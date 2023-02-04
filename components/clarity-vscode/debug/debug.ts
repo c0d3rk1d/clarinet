@@ -1,15 +1,27 @@
-import { lookpath } from "lookpath";
-import { spawn } from "child_process";
+// import { runDap } from "../../clarity-dap/pkg/clarity_dap";
 
-(async () => {
-  const path = await lookpath("clarinet");
-  if (!path) return Promise.reject("'clarinet' is not installed");
+// console.log("-".repeat(20));
+// console.log("-".repeat(20));
+// console.log("-".repeat(20));
+// (async () => {
+//   console.log("*".repeat(20));
+//   console.log("*".repeat(20));
+//   console.log("*".repeat(20));
+//   await runDap();
+// })();
+// runDap();
+// import { lookpath } from "lookpath";
+// import { spawn } from "child_process";
 
-  const dap = spawn(path, ["dap"], {
-    stdio: [process.stdin, process.stdout, process.stderr],
-  });
+// (async () => {
+//   const path = await lookpath("clarinet");
+//   if (!path) return Promise.reject("'clarinet' is not installed");
 
-  await new Promise((resolve) => {
-    dap.on("exit", resolve);
-  });
-})();
+//   const dap = spawn(path, ["dap"], {
+//     stdio: [process.stdin, process.stdout, process.stderr],
+//   });
+
+//   await new Promise((resolve) => {
+//     dap.on("exit", resolve);
+//   });
+// })();

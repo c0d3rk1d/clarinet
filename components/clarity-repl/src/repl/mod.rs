@@ -1,6 +1,7 @@
 pub mod boot;
 pub mod datastore;
-pub mod debug;
+// #[cfg(feature = "cli")]
+// pub mod debug;
 pub mod diagnostic;
 pub mod interpreter;
 pub mod session;

@@ -1,0 +1,101 @@
+[package]
+name = "clarity-dap"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+ansi_term = "0.12.1"
+lazy_static = "1.4.0"
+regex = "1.7"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0.47", features = ["unbounded_depth"] }
+sha2 = "0.10"
+sha3 = "0.9.1"
+serde_derive = "1.0"
+ripemd160 = "0.9.1"
+integer-sqrt = "0.1.3"
+libsecp256k1 = "0.5.0"
+rand = "=0.7.3"
+getrandom = { version = "0.2.3", features = ["js"] }
+rand_pcg = "0.3.1"
+rand_seeder = "0.2.2"
+atty = "0.2.14"
+futures = { version = "0.3.12" }
+debug_types = { version = "1.0.0" }
+httparse = { version = "1.6.0" }
+bytes = { version = "1.1.0" }
+log = { version = "0.4.16" }
+memchr = { version = "2.4.1" }
+chainhook_types = { package = "chainhook-types", path = "../chainhook-types-rs" }
+clarity_repl = { package = "clarity-repl", path = "../clarity-repl", default-features = false, optional = true }
+clarinet_deployments = { package = "clarinet-deployments", path = "../clarinet-deployments", default-features = false, optional = true }
+clarinet_files = { package = "clarinet-files", path = "../clarinet-files", default-features = false, optional = true }
+
+# CLI
+pico-args = { version = "0.4.0", optional = true }
+rustyline = { version = "9.1.1", optional = true }
+prettytable-rs = { version = "0.8.0", optional = true }
+hiro_system_kit = { package = "hiro-system-kit", path = "../hiro-system-kit", default-features = false, optional = true }
+
+# WASM
+serde-wasm-bindgen = { version = "0.4", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4.24", optional = true }
+web-sys = { version = "0.3", features = ["console"], optional = true }
+js-sys = { version = "0.3", optional = true }
+
+[features]
+default = ["cli"]
+cli = [
+  "pico-args",
+  "rustyline",
+  "prettytable-rs",
+  "hiro_system_kit/tokio_helpers",
+  "clarinet_deployments/cli",
+  "clarinet_files/cli",
+  "clarity_repl/cli",
+]
+wasm = [
+  "js-sys",
+  "serde-wasm-bindgen",
+  "wasm-bindgen",
+  "wasm-bindgen-futures",
+  "web-sys",
+  "clarinet_deployments/wasm",
+  "clarinet_files/wasm",
+  "clarity_repl/wasm",
+]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "clarity_dap"
+path = "src/lib.rs"
+
+[package.metadata.wasm-pack.profile.dev]
+# wasm-opt = ['-O1']
+wasm-opt = false
+
+[package.metadata.wasm-pack.profile.dev.wasm-bindgen]
+debug-js-glue = true
+demangle-name-section = true
+dwarf-debug-info = false
+
+[package.metadata.wasm-pack.profile.profiling]
+wasm-opt = ['-O']
+
+[package.metadata.wasm-pack.profile.profiling.wasm-bindgen]
+debug-js-glue = false
+demangle-name-section = true
+dwarf-debug-info = false
+
+[package.metadata.wasm-pack.profile.release]
+# wasm-opt = ['-O2']
+wasm-opt = false
+# -04  aggressively optimizes for speed
+# -0z aggressively optimizes for size
+# wasm-opt = ['-Oz']
+
+[package.metadata.wasm-pack.profile.release.wasm-bindgen]
+debug-js-glue = false
+demangle-name-section = true
+dwarf-debug-info = false

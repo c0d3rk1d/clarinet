@@ -54,9 +54,18 @@ const clientBrowserConfig = {
   plugins: [
     new webpack.DefinePlugin({
       __DEV_MODE__: JSON.stringify(false),
+      __EXTENSION_URL__: JSON.stringify(extensionURL),
     }),
   ],
-  module: { rules: [swcLoader] },
+  module: {
+    rules: [
+      swcLoader,
+      {
+        test: /src\/clarity-dap-browser\/dap-browser_bg\.wasm$/,
+        generator: { filename: "dap-browser_bg.wasm" },
+      },
+    ],
+  },
   externals: { vscode: "commonjs vscode" },
 };
 

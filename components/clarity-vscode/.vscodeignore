@@ -2,6 +2,7 @@
 
 !debug/dist/debug.js
 
+!client/dist/dap-browser_bg.wasm
 !client/dist/clientBrowser.js
 !client/dist/clientNode.js
 

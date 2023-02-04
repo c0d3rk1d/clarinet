@@ -147,6 +147,9 @@ clarinet_files = { package = "clarinet-files", path = "../clarinet-files", featu
 clarity_lsp = { package = "clarity-lsp", path = "../clarity-lsp", features = [
     "cli",
 ] }
+clarity_dap = { package = "clarity-dap", path = "../clarity-dap", features = [
+    "cli",
+] }
 clarinet_deployments = { package = "clarinet-deployments", path = "../clarinet-deployments", features = [
     "cli",
 ] }

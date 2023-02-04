@@ -9,10 +9,14 @@ members = [
     "components/clarinet-utils",
     "components/clarity-jupyter-kernel",
     "components/clarity-lsp",
+    "components/clarity-dap",
     "components/clarity-repl",
     "components/hiro-system-kit",
     "components/stacks-devnet-js",
     "components/stacks-network",
     "components/stacks-rpc-client",
 ]
-default-members = ["components/clarinet-cli", "components/chainhook-event-observer"]
+default-members = [
+    "components/clarinet-cli",
+    "components/chainhook-event-observer",
+]
