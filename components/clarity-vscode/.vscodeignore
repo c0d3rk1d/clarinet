@@ -11,6 +11,8 @@
 !server/dist/serverBrowser.js
 !server/dist/serverNode.js
 
+!server/dist/**
+
 !syntaxes/**
 !assets/**
 

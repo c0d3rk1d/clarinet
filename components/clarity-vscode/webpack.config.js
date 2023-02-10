@@ -57,15 +57,8 @@ const clientBrowserConfig = {
       __EXTENSION_URL__: JSON.stringify(extensionURL),
     }),
   ],
-  module: {
-    rules: [
-      swcLoader,
-      {
-        test: /src\/clarity-dap-browser\/dap-browser_bg\.wasm$/,
-        generator: { filename: "dap-browser_bg.wasm" },
-      },
-    ],
-  },
+  module: { rules: [swcLoader] },
+
   externals: { vscode: "commonjs vscode" },
 };
 
@@ -127,55 +120,75 @@ const serverBrowserConfig = {
 };
 
 /** @type WebpackConfig */
-const serverNodeConfig = {
-  context: path.join(__dirname, "server"),
+const serverDapBrowserConfig = {
+  context: path.join(__dirname, "server-dap"),
   mode,
   devtool,
-  target: "node",
-  entry: { serverNode: "./src/serverNode.ts" },
-  output: serverOutput,
-  resolve: { extensions: [".ts", ".js"] },
-  plugins: [
-    new WasmPackPlugin({
-      crateDirectory: path.resolve(__dirname, "../clarity-lsp"),
-      forceMode: "production",
-      extraArgs:
-        "--release --target=nodejs --no-default-features --features=wasm ",
-      outDir: path.resolve(__dirname, "server/src/clarity-lsp-node"),
-      outName: "lsp-node",
-    }),
-    new CopyPlugin({
-      patterns: [
-        {
-          from: "./src/clarity-lsp-node/lsp-node_bg.wasm",
-          to: path.join(__dirname, "server", "dist"),
-        },
-      ],
-    }),
-  ],
-  module: { rules: [swcLoader] },
-};
-
-/** @type WebpackConfig */
-const dapNodeConfig = {
-  context: path.join(__dirname, "debug"),
-  mode,
-  devtool,
-  target: "node",
-  entry: { debug: "./debug.ts" },
+  target: "webworker",
+  entry: { server: "./src/server.ts" },
   output: {
     filename: "[name].js",
-    path: path.join(__dirname, "debug", "dist"),
+    path: path.join(__dirname, "server-dap", "dist"),
     libraryTarget: "var",
     library: "serverExportVar",
   },
-  module: { rules: [swcLoader] },
+  resolve: { extensions: [".ts", ".js"] },
+  plugins: [
+    new webpack.DefinePlugin({
+      __EXTENSION_URL__: JSON.stringify(extensionURL),
+    }),
+    new WasmPackPlugin({
+      crateDirectory: path.resolve(__dirname, "../clarity-dap"),
+      extraArgs: "--release --target=web --no-default-features --features=wasm",
+      outDir: path.resolve(__dirname, "server-dap/src/clarity-dap-browser"),
+      outName: "dap-browser",
+    }),
+  ],
+  module: {
+    rules: [
+      swcLoader,
+      {
+        test: /src\/clarity-dap-browser\/dap-browser_bg\.wasm$/,
+        generator: { filename: "dap-browser_bg.wasm" },
+      },
+    ],
+  },
 };
+
+// /** @type WebpackConfig */
+// const serverNodeConfig = {
+//   context: path.join(__dirname, "server"),
+//   mode,
+//   devtool,
+//   target: "node",
+//   entry: { serverNode: "./src/serverNode.ts" },
+//   output: serverOutput,
+//   resolve: { extensions: [".ts", ".js"] },
+//   plugins: [
+//     new WasmPackPlugin({
+//       crateDirectory: path.resolve(__dirname, "../clarity-lsp"),
+//       forceMode: "production",
+//       extraArgs:
+//         "--release --target=nodejs --no-default-features --features=wasm ",
+//       outDir: path.resolve(__dirname, "server/src/clarity-lsp-node"),
+//       outName: "lsp-node",
+//     }),
+//     new CopyPlugin({
+//       patterns: [
+//         {
+//           from: "./src/clarity-lsp-node/lsp-node_bg.wasm",
+//           to: path.join(__dirname, "server", "dist"),
+//         },
+//       ],
+//     }),
+//   ],
+//   module: { rules: [swcLoader] },
+// };
 
 module.exports = [
   clientBrowserConfig,
   serverBrowserConfig,
-  clientNodeConfig,
-  serverNodeConfig,
-  dapNodeConfig,
+  serverDapBrowserConfig,
+  // clientNodeConfig,
+  // serverNodeConfig,
 ];

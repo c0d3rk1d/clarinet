@@ -1,5 +1,6 @@
 dist
 server/src/clarity-lsp-*
+server-dap/src/clarity-dap-*
 node_modules
 .vscode-test-web
 .DS_Store

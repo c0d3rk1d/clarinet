@@ -2,7 +2,7 @@ import { ExtensionContext, Uri } from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
 import { clientOpts, initClient } from "./common";
-import { activateMockDebug } from "./debug/activateClarinetDebug";
+import { activateClarityDebug } from "./debug/activateClarinetDebug";
 
 let client: LanguageClient;
 
@@ -37,7 +37,7 @@ export async function activate(context: ExtensionContext) {
   client = new LanguageClient("clarity-lsp", "Clarity LSP", clientOpts, worker);
 
   initClient(context, client);
-  activateMockDebug(context);
+  activateClarityDebug(context);
 }
 
 export function deactivate(): Thenable<void> | undefined {

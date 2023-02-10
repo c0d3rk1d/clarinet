@@ -1,47 +1,31 @@
 use super::{extract_watch_variable, AccessType, State};
-use clarinet_files::url::Url;
 use clarinet_files::FileLocation;
 use clarity_repl::clarity::vm::callables::FunctionIdentifier;
 use clarity_repl::clarity::vm::contexts::{ContractContext, GlobalContext};
 use clarity_repl::clarity::vm::errors::Error;
 use clarity_repl::clarity::vm::representations::Span;
-use clarity_repl::clarity::vm::types::{
-    CallableData, PrincipalData, SequenceData, StandardPrincipalData, Value,
-};
-use clarity_repl::clarity::vm::SymbolicExpressionType::List;
+use clarity_repl::clarity::vm::types::{PrincipalData, SequenceData, StandardPrincipalData, Value};
 use clarity_repl::clarity::vm::{
     contexts::{Environment, LocalContext},
     types::QualifiedContractIdentifier,
     EvalHook, SymbolicExpression,
 };
-use clarity_repl::clarity::vm::{
-    ContractEvaluationResult, EvaluationResult, ExecutionResult, SnippetEvaluationResult,
-};
+use clarity_repl::clarity::vm::{EvaluationResult, ExecutionResult};
 use clarity_repl::utils::serialize_event;
 use debug_types::events::*;
 use debug_types::requests::*;
 use debug_types::responses::*;
 use debug_types::types::*;
-use debug_types::*;
-use futures::{SinkExt, StreamExt};
-use js_sys::Function as JsFunction;
-use serde::{Deserialize, Serialize};
-use serde_wasm_bindgen::{to_value as encode_to_js, Serializer};
+use js_sys::{Atomics, Function as JsFunction, Int32Array};
+use serde::Serialize;
+use serde_wasm_bindgen::Serializer;
 use std::collections::HashMap;
-use std::hash::Hash;
-use std::io::Write;
-use std::path::PathBuf;
+use std::fmt::Debug;
 use wasm_bindgen::JsValue;
-// use tokio;
-// use tokio::io::{Stdin, Stdout};
-// use tokio::runtime::Runtime;
-// use tokio_util::codec::{FramedRead, FramedWrite};
-
-// use self::codec::{DebugAdapterCodec, ParseError};
 
 use super::DebugState;
 
-mod codec;
+// mod codec;
 
 #[allow(unused_macros)]
 macro_rules! log {
@@ -82,7 +66,6 @@ struct Current {
 }
 
 pub struct DAPDebugger {
-    // rt: Runtime,
     default_sender: Option<StandardPrincipalData>,
     pub path_to_contract_id: HashMap<FileLocation, QualifiedContractIdentifier>,
     pub contract_id_to_path: HashMap<QualifiedContractIdentifier, FileLocation>,
@@ -91,16 +74,15 @@ pub struct DAPDebugger {
     state: Option<DebugState>,
     send_seq: i64,
     pub launched: Option<(String, String)>,
-    pub proceed: bool,
     launch_seq: i64,
     current: Option<Current>,
     init_complete: bool,
-
     stack_frames: HashMap<FunctionIdentifier, StackFrame>,
     scopes: HashMap<i32, Vec<Scope>>,
     variables: HashMap<i32, Vec<Variable>>,
     send_response_js: JsFunction,
     send_event_js: JsFunction,
+    wp: Option<Int32Array>,
 }
 
 impl DAPDebugger {
@@ -124,7 +106,6 @@ impl DAPDebugger {
             state: None,
             send_seq: 0,
             launched: None,
-            proceed: false,
             launch_seq: 0,
             current: None,
             init_complete: false,
@@ -133,6 +114,7 @@ impl DAPDebugger {
             variables: HashMap::new(),
             send_response_js,
             send_event_js,
+            wp: None,
         }
     }
 
@@ -140,7 +122,7 @@ impl DAPDebugger {
         self.state.as_mut().unwrap()
     }
 
-    // Process all messages before launching the REPL
+    // // Process all messages before launching the REPL
     // pub fn init(&mut self) -> Result<(String, String), ParseError> {
     //     while self.launched.is_none() {
     //         match self.wait_for_command(None, None) {
@@ -151,7 +133,7 @@ impl DAPDebugger {
     //     Ok(self.launched.take().unwrap())
     // }
 
-    // Successful result boolean indicates if execution should continue based on the message received
+    // // Successful result boolean indicates if execution should continue based on the message received
     // fn wait_for_command(
     //     &mut self,
     //     env: Option<&mut Environment>,
@@ -188,6 +170,18 @@ impl DAPDebugger {
         //     message: MessageKind::Response(response),
         // };
 
+        // log!(">message: {:?}", message);
+
+        let serializer = Serializer::json_compatible();
+        let _ = match response.serialize(&serializer).map_err(|_| JsValue::NULL) {
+            Ok(r) => {
+                log!("> r: {:?}", &r);
+                self.send_response_js.call1(&JsValue::NULL, &r)
+            }
+            Err(err) => self.send_response_js.call1(&JsValue::NULL, &err),
+        };
+
+        self.send_seq += 1;
         // match self.rt.block_on(self.writer.send(message)) {
         //     Ok(_) => (),
         //     Err(e) => {
@@ -195,28 +189,14 @@ impl DAPDebugger {
         //         println!("error: send_response: {}", e);
         //     }
         // };
-        let serializer = Serializer::json_compatible();
-        let _ = match response.serialize(&serializer).map_err(|_| JsValue::NULL) {
-            Ok(r) => self.send_response_js.call1(&JsValue::NULL, &r),
-            Err(err) => self.send_response_js.call1(&JsValue::NULL, &err),
-        };
-
-        self.send_seq += 1;
     }
 
     fn send_event(&mut self, body: EventBody) {
         // let event_json = serde_json::to_string(&body).unwrap();
+        log!("> body: {:?}", &body);
         // let message = ProtocolMessage {
         //     seq: self.send_seq,
         //     message: MessageKind::Event(Event { body: Some(body) }),
-        // };
-
-        // match self.rt.block_on(self.writer.send(message)) {
-        //     Ok(_) => (),
-        //     Err(e) => {
-        //         // If we can't send, there's not really anything else we can do.
-        //         println!("error: send_event: {}", e);
-        //     }
         // };
 
         let serializer = Serializer::json_compatible();
@@ -226,6 +206,13 @@ impl DAPDebugger {
         };
 
         self.send_seq += 1;
+        // match self.rt.block_on(self.writer.send(message)) {
+        //     Ok(_) => (),
+        //     Err(e) => {
+        //         // If we can't send, there's not really anything else we can do.
+        //         println!("error: send_event: {}", e);
+        //     }
+        // };
     }
 
     // pub fn handle_request(
@@ -382,8 +369,9 @@ impl DAPDebugger {
         }));
     }
 
-    pub fn launch(&mut self, seq: i64, arguments: LaunchRequestArguments) -> bool {
+    pub fn launch(&mut self, seq: i64, arguments: LaunchRequestArguments, wp: Int32Array) -> bool {
         // Verify that the manifest and expression were specified
+        self.wp = Some(wp);
         let manifest = match arguments.manifest {
             Some(manifest) => manifest,
             None => {
@@ -573,27 +561,24 @@ impl DAPDebugger {
 
     pub fn stack_trace(&mut self, seq: i64, _arguments: StackTraceArguments) -> bool {
         log!("enter stack_trace");
-        let current = self.current.as_ref();
+        let current = self.current.as_ref().unwrap();
         log!("> current: {:?}", &current);
-        // let frames: Vec<_> = current
-        //     .stack
-        //     .iter()
-        //     .rev()
-        //     .filter(|function| !function.to_string().starts_with("_native_:"))
-        //     .map(|function| self.stack_frames[function].clone())
-        //     .collect();
+        let frames: Vec<_> = current
+            .stack
+            .iter()
+            .rev()
+            .filter(|function| !function.to_string().starts_with("_native_:"))
+            .map(|function| self.stack_frames[function].clone())
+            .collect();
 
-        // log!("> frames: {:?}", &frames);
-        // log!("----");
-
-        // let len = current.stack.len() as i32;
+        let len = current.stack.len() as i32;
         self.send_response(Response {
             request_seq: seq,
             success: true,
             message: None,
             body: Some(ResponseBody::StackTrace(StackTraceResponse {
-                stack_frames: vec![],
-                total_frames: Some(0),
+                stack_frames: frames,
+                total_frames: Some(len),
             })),
         });
         false
@@ -1090,6 +1075,7 @@ impl EvalHook for DAPDebugger {
                     },
                     None => StandardPrincipalData::transient(),
                 });
+
                 self.send_event(EventBody::Initialized);
             } else {
                 let mut stopped = StoppedEvent {
@@ -1122,7 +1108,7 @@ impl EvalHook for DAPDebugger {
                     }
                     _ => unreachable!("Unexpected state"),
                 };
-                self.send_event(EventBody::Stopped(stopped));
+                // self.send_event(EventBody::Stopped(stopped));
             }
 
             // Save the current state, which may be needed to respond to incoming requests
@@ -1143,7 +1129,19 @@ impl EvalHook for DAPDebugger {
             //         }
             //     };
             // }
-            // self.current = None;
+            if let Some(wp) = &self.wp {
+                log!("> will wait");
+                let r = Atomics::wait(&wp, 0, 0);
+                log!("> r: {:?}", &r);
+            }
+
+            // loop {
+            //     let f = JsFuture::from(JsPromise::from(self.wp.clone()));
+            //     let r = poll_immediate(f);
+            //     log!("> r: {:?}", &r);
+            // }
+
+            self.current = None;
         } else {
             // TODO: If there is already a message waiting, process it before
             //       continuing. This would be needed for a pause request.
@@ -1162,6 +1160,7 @@ impl EvalHook for DAPDebugger {
     }
 
     fn did_complete(&mut self, result: Result<&mut ExecutionResult, String>) {
+        self.send_event(EventBody::Initialized);
         match result {
             Ok(result) => {
                 self.log("Execution completed.\n");

@@ -7,17 +7,9 @@ import {
 } from "vscode";
 import { ClarityDebug } from "./debugSession";
 
-import { initSync } from "../clarity-dap-browser/dap-browser";
-
 export declare const __EXTENSION_URL__: string;
 
-export async function activateMockDebug(context: vscode.ExtensionContext) {
-  const wasmURL = new URL("client/dist/dap-browser_bg.wasm", __EXTENSION_URL__);
-
-  const wasmModule = fetch(wasmURL, {}).then((wasm) => wasm.arrayBuffer());
-
-  initSync(await wasmModule);
-
+export async function activateClarityDebug(context: vscode.ExtensionContext) {
   const provider = new ClarinetConfigurationProvider();
   context.subscriptions.push(
     vscode.debug.registerDebugConfigurationProvider("clarinet", provider),
@@ -37,8 +29,6 @@ class ClarinetConfigurationProvider
     config: DebugConfiguration,
     token?: CancellationToken,
   ): ProviderResult<DebugConfiguration> {
-    console.log("config", config);
-    console.log("folder", folder?.uri.toString());
     config.manifest = config.manifest.replace(
       "${workspaceFolder}/",
       folder?.uri.toString(),
@@ -55,6 +45,7 @@ class InlineDebugAdapterFactory
   createDebugAdapterDescriptor(
     _session: vscode.DebugSession,
   ): ProviderResult<vscode.DebugAdapterDescriptor> {
-    return new vscode.DebugAdapterInlineImplementation(new ClarityDebug());
+    const clarityDebug = new ClarityDebug();
+    return new vscode.DebugAdapterInlineImplementation(clarityDebug);
   }
 }

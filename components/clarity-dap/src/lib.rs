@@ -21,6 +21,16 @@ use serde::{Deserialize, Serialize};
 pub mod dap;
 pub mod wasm_bridge;
 
+#[allow(unused_macros)]
+macro_rules! log {
+    ( $( $t:tt )* ) => {
+        #[cfg(feature = "wasm")]
+        web_sys::console::log_1(&format!( $( $t )* ).into());
+        #[cfg(not(feature = "wasm"))]
+        println!( $($t )*);
+    }
+}
+
 #[derive(Clone)]
 pub struct Source {
     name: QualifiedContractIdentifier,

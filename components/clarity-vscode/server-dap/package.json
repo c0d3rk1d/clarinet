@@ -1,6 +1,6 @@
 {
-  "name": "clarity-lsp-server",
-  "description": "Clarity LSP server.",
+  "name": "clarity-dap-server",
+  "description": "Clarity DAP server.",
   "version": "1.0.0",
   "author": "Hiro",
   "license": "MIT",
@@ -13,8 +13,7 @@
     "url": "https://github.com/hirosystems/clarinet"
   },
   "dependencies": {
-    "node-fetch": "^3.2.10",
-    "vscode-languageserver": "^8.0.1"
+    "@vscode/debugprotocol": "^1.59.0"
   },
   "scripts": {}
 }

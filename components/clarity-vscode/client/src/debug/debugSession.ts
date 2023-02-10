@@ -1,44 +1,92 @@
-import { LoggingDebugSession, Response, Event } from "@vscode/debugadapter";
+import { DebugSession } from "@vscode/debugadapter";
 import { DebugProtocol } from "@vscode/debugprotocol";
 import * as vscode from "vscode";
 
-import { DapWasmBridge } from "../clarity-dap-browser/dap-browser";
 import { fileArrayToString } from "../utils/files";
 
-export class ClarityDebug extends LoggingDebugSession {
-  dap: DapWasmBridge;
+export declare const __EXTENSION_URL__: string;
+
+export class ClarityDebug extends DebugSession {
+  forwardMessage: (msg: DebugProtocol.ProtocolMessage) => void;
+  messagesQueue: DebugProtocol.ProtocolMessage[];
+  ready: boolean;
 
   public constructor() {
     super();
-    const dapDebugger = new DapWasmBridge(
-      fileAccessor,
-      async (res: Response) => {
-        this.sendResponse(res);
-      },
-      async (event: Event) => {
-        console.log("event", event);
-        this.sendEvent(event);
-      },
+    const serverMain = vscode.Uri.joinPath(
+      vscode.Uri.parse(__EXTENSION_URL__),
+      "server-dap/dist/server.js",
     );
-    this.dap = dapDebugger;
+
+    this.ready = false;
+    this.messagesQueue = [];
+
+    const worker = new Worker(serverMain.toString(true));
+    worker.postMessage("init");
+    worker.onmessage = (ev) => {
+      const data = ev.data;
+      if (data.type === "event") {
+        if (data.method === "worker-ready") {
+          this.ready = true;
+          this.onWorkerReady();
+          return;
+        }
+      }
+
+      if (data.type === "request") {
+        if (data.method.startsWith("vfs/")) {
+          const id = data.id;
+          fileAccessor(data.method, data.data).then((res) => {
+            worker.postMessage({ id, type: "response", data: res });
+          });
+          return;
+        }
+      }
+
+      if (data.type === "debugger-response") {
+        this.sendResponse(data.res);
+        return;
+      }
+      if (data.type === "debugger-event") {
+        this.sendEvent(data.event);
+        return;
+      }
+      console.warn(`unhandled message`, data);
+    };
+
+    this.forwardMessage = (message) => {
+      const sab = new SharedArrayBuffer(1024);
+      const int32 = new Int32Array(sab);
+      const res = worker.postMessage({ type: "debug-message", message, int32 });
+      setTimeout(() => {
+        console.log("go2");
+        Atomics.store(int32, 0, 123);
+        Atomics.notify(int32, 0, 1);
+      }, 5000);
+    };
   }
 
-  handleMessage(msg: DebugProtocol.ProtocolMessage): void {
-    console.log("-".repeat(20));
-    console.log("msg", msg);
-    if (msg.type === "request") {
-      const request = msg as DebugProtocol.Request;
-      console.log("request", request.command);
-      this.dap
-        .handleMessage(BigInt(request.seq), request.command, request.arguments)
-        .then((res) => console.log("res", res))
-        .catch((err) => console.error(err));
+  handleMessage(message: DebugProtocol.ProtocolMessage): void {
+    console.log("-".repeat(20), message.type);
+    if (!this.ready) {
+      this.messagesQueue.push(message);
+      return;
     }
+    this.forwardMessage(message);
+
+    //   // setTimeout(() => {
+    //   //   console.log("go2");
+    //   //   Atomics.store(int32, 0, 123);
+    //   //   Atomics.notify(int32, 0, 1);
+    //   // }, 2000);
+    //   // console.log("res", res);
+    //   // if (request.command === "launch") {
+    //   //   this.dap.runDap();
+    //   // }
   }
 
-  on(eventName: string | symbol, listener: (...args: any[]) => void): this {
-    console.log("eventName", eventName);
-    return this;
+  onWorkerReady(): void {
+    this.messagesQueue.forEach((message) => this.handleMessage(message));
   }
 }
 
@@ -87,5 +135,5 @@ async function fileAccessor(action: string, event: any) {
     );
   }
   console.warn(`unexpected vfs action ${action}`);
-  return Promise.resolve(true);
+  return false;
 }

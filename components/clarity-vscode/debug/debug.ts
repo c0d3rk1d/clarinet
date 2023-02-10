@@ -1,15 +1,3 @@
-// import { runDap } from "../../clarity-dap/pkg/clarity_dap";
-
-// console.log("-".repeat(20));
-// console.log("-".repeat(20));
-// console.log("-".repeat(20));
-// (async () => {
-//   console.log("*".repeat(20));
-//   console.log("*".repeat(20));
-//   console.log("*".repeat(20));
-//   await runDap();
-// })();
-// runDap();
 // import { lookpath } from "lookpath";
 // import { spawn } from "child_process";
 

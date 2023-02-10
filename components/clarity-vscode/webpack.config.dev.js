@@ -9,7 +9,8 @@ const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 
 const configs = require("./webpack.config");
 
-const [clientBrowserConfig, serverBrowserConfig] = configs;
+const [clientBrowserConfig, serverBrowserConfig, serverDapBrowserConfig] =
+  configs;
 
 const extensionURL = "http://localhost:3000/static/devextensions/";
 
@@ -17,13 +18,6 @@ clientBrowserConfig.plugins = [
   new webpack.DefinePlugin({
     __DEV_MODE__: JSON.stringify(true),
     __EXTENSION_URL__: JSON.stringify(extensionURL),
-  }),
-  new WasmPackPlugin({
-    crateDirectory: path.resolve(__dirname, "../clarity-dap"),
-    extraArgs: "--release --target=web --no-default-features --features=wasm",
-    outDir: path.resolve(__dirname, "client/src/clarity-dap-browser"),
-    outName: "dap-browser",
-    watchDirectories: [path.resolve(__dirname, "../clarity-dap")],
   }),
 ];
 
@@ -39,4 +33,20 @@ serverBrowserConfig.plugins = [
   // }),
 ];
 
-module.exports = [clientBrowserConfig, serverBrowserConfig];
+serverDapBrowserConfig.plugins = [
+  new webpack.DefinePlugin({
+    __EXTENSION_URL__: JSON.stringify(extensionURL),
+  }),
+  new WasmPackPlugin({
+    crateDirectory: path.resolve(__dirname, "../clarity-dap"),
+    extraArgs: "--release --target=web --no-default-features --features=wasm",
+    outDir: path.resolve(__dirname, "server-dap/src/clarity-dap-browser"),
+    outName: "dap-browser",
+  }),
+];
+
+module.exports = [
+  clientBrowserConfig,
+  serverBrowserConfig,
+  serverDapBrowserConfig,
+];
